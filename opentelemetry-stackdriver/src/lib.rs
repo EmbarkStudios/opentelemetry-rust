@@ -79,9 +79,14 @@ impl StackDriverExporter {
 #[async_trait]
 impl SpanExporter for StackDriverExporter {
     async fn export(&mut self, batch: Vec<SpanData>) -> ExportResult {
+        println!("EXPORT BATCH: {}", batch.len());
         match self.tx.try_send(batch) {
-            Err(e) => Err(e.into()),
+            Err(e) => {
+                println!("EXPORT FAIL: {e}");
+                Err(e.into())
+            },
             Ok(()) => {
+                println!("EXPORT OK");
                 self.pending_count.fetch_add(1, Ordering::Relaxed);
                 Ok(())
             }
@@ -150,6 +155,7 @@ impl Builder {
     where
         Error: From<A::Error>,
     {
+        println!("BUILDING");
         let Self {
             maximum_shutdown_duration,
             num_concurrent_requests,
@@ -183,6 +189,7 @@ impl Builder {
 
         let count_clone = pending_count.clone();
         let future = async move {
+            println!("RUNNING DRIVER");
             let trace_client = TraceServiceClient::new(trace_channel);
             let authorizer = &authenticator;
             let log_client = log_client.clone();
@@ -210,6 +217,7 @@ impl Builder {
                 .unwrap_or_else(|| Duration::from_secs(5)),
         };
 
+        println!("BUILT");
         Ok((exporter, future))
     }
 }
@@ -231,6 +239,7 @@ where
 
         let mut entries = Vec::new();
         let mut spans = Vec::with_capacity(batch.len());
+        println!("EXPORT IMPL BATCH: {}", batch.len());
         for span in batch {
             let attribute_map = span
                 .attributes
@@ -335,8 +344,10 @@ where
 
         self.pending_count.fetch_sub(1, Ordering::Relaxed);
         if let Err(e) = self.authorizer.authorize(&mut req, &self.scopes).await {
+            println!("FAILED TRACE AUTH: {e}");
             handle_error(TraceError::from(Error::from(e)));
         } else if let Err(e) = self.trace_client.batch_write_spans(req).await {
+            println!("FAILED TRACE SEND: {e}");
             handle_error(TraceError::from(Error::TonicRpc(e)));
         }
 
@@ -359,8 +370,10 @@ where
         });
 
         if let Err(e) = self.authorizer.authorize(&mut req, &self.scopes).await {
+            println!("FAILED LOG AUTH: {e}");
             handle_error(TraceError::from(Error::from(e)));
         } else if let Err(e) = client.client.write_log_entries(req).await {
+            println!("FAILED LOG SEND: {e}");
             handle_error(TraceError::from(Error::TonicRpc(e)));
         }
     }
